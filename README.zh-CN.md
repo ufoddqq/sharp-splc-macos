@@ -104,7 +104,27 @@ lp -d SHARP_SPLC -o fit=exact -o tone=photo photo.jpg
 | 多份打印 | 可用（交给机器做硬件份数） |
 | 双面 | 已下发 `j=1` 标志，**未逐机型验证**，先试一张 |
 | 非 A4 尺寸 | 没有做成参数 |
-| 扫描 | 另一套机制，见 [docs/scan-to-mac.md](docs/scan-to-mac.md) |
+| 扫描 | 已包含：`scan/` 在 Mac 上跑 FTP 接收端（见下） |
+
+## 扫描（机器 → Mac）
+
+扫描是完全另一套机制：机器主动推送图像，Mac 这端只要提供一个 FTP 目的地，不需要编码器。
+
+```sh
+sudo ./scan/install-scan.sh                        # 默认 ~/Scans，随机密码并打印出来
+sudo ./scan/install-scan.sh --dir /Volumes/Data/Scans --password '自定义密码'
+sudo ./scan/install-scan.sh --uninstall
+```
+
+它会写入 `/Library/LaunchDaemons/com.sharp.scanreceiver.plist`（21 端口需要 root）、启动服务，
+并打印面板上要填的那几项。收到的 PDF 会就地归一化成 A4：只改 `MediaBox` 并在内容外
+套一层缩放矩阵，图像数据一字节不动；已经是 A4 的文件第二次处理会被跳过。
+
+面板侧：先按 **CA** 退出 `nEt`，再按 **Scan** 加数字键 `1`–`5`。键 `6` 是 Sharpdesk，
+它在等一个永远不会来的 Windows 客户端——这就是大家卡住的 `nEt`。详见
+[docs/scan-to-mac.md](docs/scan-to-mac.md)。
+
+> 明文 FTP，没有 TLS。只在可信局域网使用，务必设置一个像样的密码。
 
 ## 目录
 
@@ -115,8 +135,11 @@ agent.py                   回环服务（127.0.0.1:9123），负责渲染与发
 backend/splcprint          CUPS 后端，把 spool 文件转给 agent
 install.sh                 安装 / 卸载
 tools/extract-band1.py     从夏普驱动中提取静态资源
+scan/scan_receiver.py      FTP 接收端（仅标准库）：只接受登录与上传，不接受删除/改名
+scan/a4_normalize.py       A4 归一化，走 PDF 增量更新，不重编码图像
+scan/install-scan.sh       把接收端装成 LaunchDaemon，监听 21 端口
 docs/findings.md           如何证明这台机器打不了 PDF/PCL/PS
-docs/scan-to-mac.md        反方向：扫描到 Mac
+docs/scan-to-mac.md        扫描方向的详细步骤
 ```
 
 ## 这不是「破解」

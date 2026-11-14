@@ -3,9 +3,13 @@
 The other direction is much easier than printing, and needs no custom encoder at all — it is
 pure configuration on the printer plus an FTP receiver on the Mac.
 
-> This page is a cookbook, not code. The receiver used on the reference machine is a small
-> Python FTP service with A4 normalisation; it is not part of this repository (yet). Open an
-> issue if you want it published.
+The receiving side is included in `scan/`:
+
+| File | What |
+|---|---|
+| `scan/scan_receiver.py` | FTP server, standard library only. Implements login + upload, refuses delete/rename |
+| `scan/a4_normalize.py` | incremental PDF update that turns any page into A4 without re-encoding images |
+| `scan/install-scan.sh` | installs the receiver as a LaunchDaemon on port 21, generates a password |
 
 ## Why it "doesn't work" out of the box
 
@@ -49,21 +53,31 @@ receiving side if you always want A4.
 
 ## Mac side
 
-Any FTP server that accepts a plain upload works. Two practical notes:
-
-1. **Bind it to the LAN address, not `0.0.0.0`**, and put it behind macOS firewall rules that
-   only allow the printer's IP.
-2. **Normalise page size after arrival** if you want uniform A4. Rewriting just the PDF
-   `MediaBox` plus a scale matrix is enough — do not re-encode the images, or quality drops and
-   a 300 dpi page takes seconds instead of milliseconds. Make the step idempotent so a second
-   pass does not shrink an already-normalised file.
-
-A simple layout that works well:
-
+```sh
+sudo ./scan/install-scan.sh                       # ~/Scans, random password, prints it
+sudo ./scan/install-scan.sh --dir /Volumes/Data/Scans --password 'something-long'
+sudo ./scan/install-scan.sh --uninstall
 ```
-~/Scans/incoming/    ← FTP writes here
-~/Scans/             ← normalised, date-named PDFs land here
-```
+
+It writes `/Library/LaunchDaemons/com.sharp.scanreceiver.plist`, starts the receiver, and
+prints exactly what to type on the printer panel. Two practical notes:
+
+1. **Restrict who can reach it.** The daemon listens on all interfaces, because the printer may
+   reach the Mac through a different interface than the default route does. Add a macOS
+   firewall rule that only allows the printer's IP; if you know the exact address, pass
+   `--bind` to `scan_receiver.py` to limit it further.
+2. **Normalise page size after arrival** if you want uniform A4. `a4_normalize.py` only rewrites
+   the PDF `MediaBox` plus a scale matrix — images are never re-encoded, so a 300 dpi page takes
+   milliseconds and loses nothing. The step is idempotent: an already-normalised file is left
+   alone.
+
+The password is generated with `secrets.token_urlsafe(9)` when you do not pass `--password`,
+and is stored in the LaunchDaemon plist. Plain FTP means no TLS — treat the password as
+LAN-only material.
+
+Files land directly in the target directory (`~/Scans` by default) and are normalised in place;
+no separate incoming folder is needed, because the receiver writes to a temporary name and
+renames only after the upload completes.
 
 ## Verifying
 

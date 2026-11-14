@@ -106,7 +106,29 @@ Printable canvas is 4696 × 6382 px at 600 dpi (198.8 × 270.2 mm), slightly sma
 | Multiple copies | works (passed to the printer as a hardware copy count) |
 | Duplex | the flag is sent (`j=1` in the setup string); not validated on every model — try one sheet |
 | Non-A4 paper sizes | not exposed as an option |
-| Scanning | different mechanism, see [docs/scan-to-mac.md](docs/scan-to-mac.md) |
+| Scanning | included: `scan/` runs an FTP receiver on the Mac (see below) |
+
+## Scanning (printer → Mac)
+
+Scanning is a completely different mechanism: the printer pushes the image, so the Mac only
+has to offer an FTP destination. No custom encoder involved.
+
+```sh
+sudo ./scan/install-scan.sh                        # ~/Scans, random password, printed for you
+sudo ./scan/install-scan.sh --dir /Volumes/Data/Scans --password 'something-long'
+sudo ./scan/install-scan.sh --uninstall
+```
+
+It installs `/Library/LaunchDaemons/com.sharp.scanreceiver.plist` (port 21 needs root), starts
+the receiver, and prints the exact values to type on the printer panel. Received PDFs are
+normalised to A4 in place by rewriting only the `MediaBox` and wrapping the content in a
+scale matrix — images are never re-encoded, and a second pass leaves an A4 file untouched.
+
+Panel side, in short: press **CA** to leave `nEt`, then **Scan** and a number key `1`–`5`.
+Key `6` is Sharpdesk, which waits for a Windows client that will never arrive — that is the
+`nEt` people get stuck on. Details in [docs/scan-to-mac.md](docs/scan-to-mac.md).
+
+> Plain FTP, no TLS. Keep it on a trusted LAN, and set a real password.
 
 ## Repository layout
 
@@ -117,8 +139,11 @@ agent.py                   loopback service (127.0.0.1:9123) that renders and se
 backend/splcprint          CUPS backend, forwards the spool file to the agent
 install.sh                 installer / uninstaller
 tools/extract-band1.py     pulls the vendor static resource out of a Sharp driver
+scan/scan_receiver.py      FTP receiver (stdlib only); login + upload, no delete/rename
+scan/a4_normalize.py       A4 normalisation via PDF incremental update
+scan/install-scan.sh       installs the receiver as a LaunchDaemon on port 21
 docs/findings.md           how we know the printer cannot print PDF/PCL/PS
-docs/scan-to-mac.md        the scan direction (printer pushes FTP to the Mac)
+docs/scan-to-mac.md        the scan direction in detail
 ```
 
 ## Why this is not a "crack"
