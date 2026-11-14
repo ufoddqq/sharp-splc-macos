@@ -1,0 +1,81 @@
+#!/bin/sh
+# ---------------------------------------------------------------------------
+# splcprint —— SHARP AR-2221R 直连后端
+#
+# 安装位置：/usr/libexec/cups/backend/splcprint   (root:wheel 0755)
+#
+# 为什么这么薄
+#   macOS 把 CUPS 后端放进沙盒，身份 `_lp`，只能读 CUPS 自己的目录，
+#   连 /tmp 都写不了，也读不到用户目录里的 Python 包。
+#   所以这里只做一件事：把作业数据通过回环 TCP 转发给用户级渲染服务
+#   (com.splcprint.agent, 127.0.0.1:9123)，由它做渲染与发送。
+#
+# CUPS 调用约定（本机实测为 6 个参数，无 device-uri）：
+#   $1=job-id  $2=user  $3=title  $4=copies  $5=options  $6=spool-file
+# 兼容带 device-uri 的 7 参数形式（$1 形如 splcprint://…）。
+# ---------------------------------------------------------------------------
+
+# 无参数 = CUPS 在做设备发现
+if [ $# -lt 1 ]; then
+    echo 'direct splcprint:/ "SHARP AR-2221R (Mac 直连)" "Sharp AR-2221R / SPLC"'
+    exit 0
+fi
+
+case "$1" in
+    *://*|*:/*) shift ;;            # 去掉 device-uri
+esac
+
+JOB="${1:-0}"
+COPIES="${4:-1}"
+OPTS="${5:-}"
+FILE="${6:-}"
+
+FIT=auto
+TONE=text
+THRESH=200
+for kv in $OPTS; do
+    case "$kv" in
+        fit=*)    FIT="${kv#fit=}" ;;
+        tone=*)   TONE="${kv#tone=}" ;;
+        thresh=*) THRESH="${kv#thresh=}" ;;
+        copies=*) COPIES="${kv#copies=}" ;;
+    esac
+done
+[ -n "$COPIES" ] || COPIES=1
+
+PORT="${SPLC_PORT:-9123}"
+
+# 整个连接过程放进子 shell：即使 exec 重定向失败也只退出子 shell，
+# 不会把脚本本身带崩（POSIX 规定非交互 shell 遇 exec 重定向错误会直接退出）。
+(
+    exec 3<>"/dev/tcp/127.0.0.1/$PORT" || {
+        echo "splcprint: 渲染服务未运行（127.0.0.1:$PORT）。恢复：launchctl kickstart -k gui/501/com.splcprint.agent" >&2
+        exit 1
+    }
+
+    if [ -n "$FILE" ] && [ -f "$FILE" ]; then
+        SIZE=$(/usr/bin/stat -f%z "$FILE" 2>/dev/null || echo 0)
+        printf 'SPLC1 %s %s %s %s %s %s\n' "$JOB" "$COPIES" "$FIT" "$TONE" "$THRESH" "$SIZE" >&3
+        /bin/cat "$FILE" >&3 || { echo "splcprint: 作业数据转发中断" >&2; exit 1; }
+    else
+        # 老式 5 参数：数据在 stdin，先落到 CUPS 自己的 tmp 再转发
+        TMP="/private/var/spool/cups/tmp/splcprint.$$"
+        /bin/cat > "$TMP" 2>/dev/null || { echo "splcprint: 无法缓存作业数据" >&2; exit 1; }
+        SIZE=$(/usr/bin/stat -f%z "$TMP" 2>/dev/null || echo 0)
+        printf 'SPLC1 %s %s %s %s %s %s\n' "$JOB" "$COPIES" "$FIT" "$TONE" "$THRESH" "$SIZE" >&3
+        /bin/cat "$TMP" >&3
+        rm -f "$TMP"
+    fi
+
+    REPLY=""
+    IFS= read -r -t 900 REPLY <&3
+    RC=$?
+    exec 3>&-
+
+    case "$REPLY" in
+        OK*) exit 0 ;;
+        "")  echo "splcprint: 渲染服务无回应（read rc=$RC，作业可能已打印，请到机器前确认）" >&2; exit 1 ;;
+        *)   echo "splcprint: 打印失败：$REPLY" >&2; exit 1 ;;
+    esac
+)
+exit $?

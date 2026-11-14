@@ -1,0 +1,19 @@
+# vendor data, never redistribute
+band1.bin
+sd3bnp2.dat
+*.dat
+
+# generated jobs
+*.spl
+
+# logs
+*.log
+*-agent.out
+*-agent.err
+
+# python
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
